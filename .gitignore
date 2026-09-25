@@ -4,3 +4,10 @@ __pycache__/
 captures/
 .pytest_cache/
 *_out.png
+anotherstudyguide.md
+Basic Prompt.md
+claude_suggestion.md
+gemini_suggestion.md
+PLAN.md
+STUDY_GUIDE.md
+doc
