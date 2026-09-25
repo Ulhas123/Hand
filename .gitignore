@@ -1,0 +1,6 @@
+__pycache__/
+.venv/
+*.pyc
+captures/
+.pytest_cache/
+*_out.png

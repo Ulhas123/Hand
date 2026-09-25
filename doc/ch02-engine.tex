@@ -1,0 +1,437 @@
+\chapter{The Under-the-Hood ML Engine}
+\label{ch:engine}
+
+Chapter~\ref{ch:foundations} established that this project only ever runs \emph{inference}: the
+weights were trained once, by someone else, and shipped inside the MediaPipe wheel. This chapter
+opens the box. It explains the two-stage architecture that makes real-time hand tracking possible on
+a CPU, what the model actually outputs, and the three dependency pins that will break your
+installation if you ignore them.
+
+\section{The two-stage pipeline}
+
+A naive design would run one enormous neural network over the entire $640 \times 480$ frame, every
+frame, looking for 21 landmarks. That design would be far too slow: most of the image is background,
+and re-searching the whole frame 30 times a second wastes almost all of the computation.
+
+MediaPipe's solution is to split the problem into a cheap ``where'' and an expensive ``what''.
+
+\begin{mlconcept}{Stage 1 --- BlazePalm: find the hand, coarsely}
+\textbf{BlazePalm} is a \emph{single-shot detector}. Its job is not to find fingers; it is to answer
+one question, roughly: \emph{is there a palm here, and where?}
+
+It works by sliding a set of predefined boxes --- called \textbf{anchors} --- over a downsampled
+version of the frame, and for each anchor predicting two things:
+
+\begin{enumerate}
+  \item a \textbf{score}: how likely is it that this box contains a palm?
+  \item an \textbf{offset}: how should the box be nudged and resized to fit better?
+\end{enumerate}
+
+It predicts a palm rather than a whole hand on purpose. A palm is rigid: its shape and size vary
+little between people and poses, and --- critically --- it looks similar whether the hand is open,
+closed, or rotated. A fist and an open hand have nearly the same palm box. That robustness is what
+makes the detector reliable enough to hand off to stage two.
+
+The output of stage 1 is one or more rectangles (plus a rotation angle, for hands tilted in the
+image plane) that are \emph{likely} to contain a palm.
+\end{mlconcept}
+
+\begin{mlconcept}{Stage 2 --- the landmark model: find the 21 points, precisely}
+Stage 2 takes the box from stage 1, \textbf{crops the frame to that box}, resizes the crop to the
+network's fixed input size, and runs a second, more expensive network whose only job is regression on
+21 specific points.
+
+Because the crop is small and tightly centred on the hand, the network sees the fingers at high
+effective resolution --- a fingertip may occupy 30 pixels in the crop where it occupied 5 in the full
+frame. That is how it can predict a knuckle to a fraction of a pixel.
+
+The output is 21 landmarks, each with three coordinates $(x, y, z)$ normalised to $[0, 1]$ relative
+to the \emph{full} frame --- the library maps the crop coordinates back for you. The $z$ value is
+relative depth, roughly ``how far in front of or behind the wrist plane'', and it is what makes this
+a 3D system: fingers pointing at the camera still separate correctly in depth.
+\end{mlconcept}
+
+\begin{center}
+\begin{tikzpicture}[
+  box/.style={draw=slateline, fill=slatebg, rounded corners=1.2mm, align=center,
+              inner sep=3mm, font=\small\sffamily, text=navy},
+  lbl/.style={font=\scriptsize\sffamily, text=slatetext},
+  ar/.style={-{Stealth[length=2.2mm]}, draw=cyanx, line width=1pt}
+]
+  % Full frame
+  \draw[draw=slateline, fill=white, line width=1pt] (0,0) rectangle (3.2,2.4);
+  \node[lbl] at (1.6,-0.24) {full frame $640\times480$ (downsampled)};
+  \node[lbl, text=cyanx] at (1.6, 2.05) {stage 1: BlazePalm};
+
+  % palm box inside frame
+  \draw[draw=amberx, line width=1.2pt, fill=ambersoft]
+        (1.0,0.55) rectangle (2.15,1.85);
+  \node[lbl, text=amberx] at (1.57, 0.32) {palm box};
+
+  % arrow to crop
+  \draw[ar] (3.32,1.2) -- (4.18,1.2) node[midway, above, lbl] {crop};
+
+  % Crop box
+  \draw[draw=slateline, fill=white, line width=1pt] (4.3,0.35) rectangle (6.1,2.05);
+  \node[lbl] at (5.2,-0.24) {crop, resized};
+  \node[lbl, text=tealx] at (5.2, 2.05) {stage 2};
+
+  % hand inside the crop
+  \begin{scope}[shift={(5.02,0.75)}, scale=0.30]
+    \handcoordinates
+    \handbones
+    \foreach \i in {0,...,20} {\node[joint, minimum size=4pt] at (L\i) {};}
+    \foreach \i in {4,12,16,20} {\node[jointtip, minimum size=5pt] at (L\i) {};}
+  \end{scope}
+
+  % arrow to output
+  \draw[ar] (6.22,1.2) -- (7.08,1.2) node[midway, above, lbl] {regress};
+
+  % Output box
+  \node[box, text width=2.5cm] (out) at (8.5,1.2)
+    {21 landmarks\\ $(x,y,z)$\\ normalised};
+  \node[lbl, text=tealx] at (8.5, 2.05) {stage 2 output};
+\end{tikzpicture}
+\captionof{figure}{The two-stage detection pipeline. Stage 1 searches the whole frame for a palm box
+--- cheap, because the image is downsampled and the target is rigid. Stage 2 runs a heavier network
+only inside that box. The split is what buys 30 FPS on a CPU.}
+\label{fig:twostage}
+\end{center}
+
+\begin{keyidea}
+\textbf{The economic argument for two stages.} Suppose the full frame costs 100 units of compute and
+a crop costs 10. Running the expensive network full-frame costs 100 per frame. Running a cheap
+detector once and the expensive network on a crop costs roughly $5 + 10 = 15$ --- and when the hand
+is moving smoothly, MediaPipe can even skip the detector entirely for several frames and simply
+\emph{track} the box, because it also predicts the hand's position in the next frame. That is the
+difference between 8 FPS and 30 FPS, and it is why the design works at all.
+\end{keyidea}
+
+\section{What the model reports: the 21 landmarks}
+
+MediaPipe numbers the 21 landmarks in a fixed order. \textbf{These indices are the vocabulary of the
+entire project} --- every rule in Chapter~\ref{ch:math} is expressed as arithmetic on them, so they
+are worth learning properly.
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[scale=1.35, every node/.style={font=\scriptsize\sffamily}]
+  \handcoordinates
+  \handbones
+  \foreach \i in {0,...,20} {\node[joint] at (L\i) {};}
+  \foreach \i in {4,8,12,16,20} {\node[jointtip] at (L\i) {};}
+
+  % emphasised landmarks
+  \node[draw=redx, circle, inner sep=1.6pt, line width=0.9pt] at (L8) {};
+
+  % labels
+  \node[right=1pt, text=navy, font=\scriptsize\sffamily\bfseries] at (L0)  {0 wrist};
+  \node[right=1pt, text=navy, font=\scriptsize\sffamily\bfseries] at (L4)  {4 thumb tip};
+  \node[left=1pt,  text=navy, font=\scriptsize\sffamily\bfseries] at (L5)  {5 index MCP};
+  \node[above right=1pt, text=navy, font=\scriptsize\sffamily\bfseries] at (L8) {8 index tip};
+  \node[left=1pt,  text=navy, font=\scriptsize\sffamily\bfseries] at (L17) {17 pinky MCP};
+
+  \node[right=1pt, text=slatetext] at (L12) {12};
+  \node[left=1pt,  text=slatetext] at (L16) {16};
+  \node[left=1pt,  text=slatetext] at (L20) {20};
+  \node[right=1pt, text=slatetext] at (L6)  {6};
+  \node[left=1pt,  text=slatetext] at (L10) {10};
+  \node[left=1pt,  text=slatetext] at (L14) {14};
+  \node[left=1pt,  text=slatetext] at (L18) {18};
+
+  % annotations
+  \draw[decorate, decoration={brace, amplitude=3pt, mirror}, draw=tealx]
+        (1.35,0.95) -- (1.35,3.55) node[midway, right=4pt, text=tealx, align=left]
+        {four long\\fingers};
+\end{tikzpicture}
+\caption{The MediaPipe hand topology. The bold labels are the landmarks this project reasons about
+directly: the wrist anchors the palm normal, the thumb tip and IP joint drive the thumb rule, and
+indices 5 and 17 define the palm plane. Tip landmarks are drawn in amber; the index tip --- the one
+carrying the smoothed marker --- is ringed in red.}
+\label{fig:landmarks}
+\end{figure}
+
+\subsection{The landmark table}
+
+The naming convention is systematic, and worth internalising: \textbf{MCP} is the knuckle
+(metacarpophalangeal joint), \textbf{PIP} the first finger joint, \textbf{DIP} the second, and
+\textbf{TIP} the end of the finger. \textbf{CMC} is the base of the thumb, at the wrist.
+
+\begin{center}
+\rowcolors{2}{slatebg}{white}
+\begin{tabularx}{\textwidth}{@{}r l l X@{}}
+\toprule
+\rowcolor{white}
+\textbf{Index} & \textbf{Name} & \textbf{Short} & \textbf{Role in this project} \\
+\midrule
+0  & Wrist              & WRIST      & Origin of both palm vectors; defines the palm plane \\
+1  & Thumb CMC          & ---        & \textit{(not used directly)} \\
+2  & Thumb MCP          & ---        & \textit{(not used directly)} \\
+3  & Thumb IP           & THUMB\_IP  & The thumb rule's ``comparison'' point \\
+4  & Thumb tip          & THUMB\_TIP & The thumb rule's ``extended?'' point \\
+5  & Index MCP          & INDEX\_MCP & Second palm vector endpoint; index-finger base \\
+6  & Index PIP          & ---        & The knuckle index 8 must beat vertically \\
+7  & Index DIP          & ---        & \textit{(not used directly)} \\
+8  & Index tip          & INDEX\_TIP & The accentuated, EMA-smoothed marker \\
+9  & Middle MCP         & ---        & \textit{(not used directly)} \\
+10 & Middle PIP         & ---        & The knuckle index 12 must beat vertically \\
+11 & Middle DIP         & ---        & \textit{(not used directly)} \\
+12 & Middle tip         & ---        & Middle finger extension test \\
+13 & Ring MCP           & ---        & \textit{(not used directly)} \\
+14 & Ring PIP           & ---        & The knuckle index 16 must beat vertically \\
+15 & Ring DIP           & ---        & \textit{(not used directly)} \\
+16 & Ring tip           & ---        & Ring finger extension test \\
+17 & Pinky MCP          & PINKY\_MCP & The thumb rule's fixed reference point \\
+18 & Pinky PIP          & ---        & The knuckle index 20 must beat vertically \\
+19 & Pinky DIP          & ---        & \textit{(not used directly)} \\
+20 & Pinky tip          & ---        & Pinky finger extension test \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{keyidea}
+\textbf{Only nine of the twenty-one landmarks do any work.} The project reads indices
+$0, 3, 4, 5, 8, 12, 16, 17, 20$ --- plus the four PIP joints $6, 10, 14, 18$ as vertical references.
+That is a feature, not an oversight: a rule that uses fewer inputs is easier to reason about, easier
+to test, and less exposed to jitter in landmarks that carry no information.
+\end{keyidea}
+
+\subsection{Why 21 points, and not a bounding box or a mask}
+
+\begin{mlconcept}{The representation choice, and what it buys you}
+There are three common ways to represent a detected hand:
+
+\begin{itemize}
+  \item \textbf{A bounding box} --- four numbers. Cheap, but useless for fingers: a fist and an open
+        hand have the same box.
+  \item \textbf{A segmentation mask} --- a pixel-per-pixel ``is this hand?'' image. Precise, but
+        expensive, and it still does not tell you \emph{which} pixel is a knuckle.
+  \item \textbf{Keypoints} --- a small, fixed set of semantically named points. Compact, cheap to
+        compare, and every point has a \emph{meaning}: index 8 \emph{is} the index fingertip.
+\end{itemize}
+
+The project needs semantics, not pixels. Its questions are ``is this fingertip above that knuckle?''
+and ``how far is the thumb from the pinky knuckle?'' --- questions about \emph{identified joints}.
+Keypoints answer them directly with 63 numbers ($21 \times 3$) instead of a mask with 307{,}200.
+\end{mlconcept}
+
+\section{The dependency matrix, and three package traps}
+\label{sec:deps}
+
+The project pins exactly three packages:
+
+\begin{center}
+\rowcolors{2}{slatebg}{white}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\rowcolor{white}
+\textbf{Pin} & \textbf{Installs} & \textbf{Why exactly this} \\
+\midrule
+\code{mediapipe==0.10.14} & the model + runtime &
+  The last release family with the legacy \code{mp.solutions.hands} API the project is built on.
+  Everything from 0.10.30 onward has removed it. \\
+\code{opencv-contrib-python}\newline\code{==4.11.0.86} & \code{cv2} &
+  The \emph{contrib} build, not \code{opencv-python}: MediaPipe already depends on it, so pinning
+  the same package avoids two competing \code{cv2} installs. \\
+\code{numpy<2} & numerical arrays &
+  MediaPipe 0.10.x wheels are compiled against the NumPy 1.x ABI. NumPy 2.0 changed that ABI. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+Each of the three is a real trap that has cost real people real hours. Take them one at a time.
+
+\begin{edgetrap}{Trap 1 --- two \code{cv2} packages fighting over one name}
+OpenCV ships under several PyPI names: \code{opencv-python}, \code{opencv-contrib-python},
+\code{opencv-python-headless}, and so on. They all install the \textbf{same importable module name},
+\code{cv2}, into \code{site-packages}.
+
+\textbf{MediaPipe's own dependency list includes \code{opencv-contrib-python}.} So this
+\code{requirements.txt} would be actively harmful:
+
+\begin{lstlisting}
+mediapipe==0.10.14
+opencv-python==4.10.0.84      # <-- WRONG: a second, competing cv2
+numpy<2
+\end{lstlisting}
+
+pip will happily install both. Then \code{import cv2} resolves to whichever package wrote its files
+last, and upgrading one can silently break the other --- producing the notorious
+``it works on my machine'' failures that are almost impossible to debug because
+\code{cv2.\_\_version\_\_} can report one thing while the code that runs comes from the other.
+
+\textbf{The fix.} Pin the package MediaPipe already wants. The contrib build is a strict
+\emph{superset} of the base build --- it adds extra modules --- so nothing is lost:
+
+\begin{lstlisting}
+mediapipe==0.10.14
+opencv-contrib-python==4.11.0.86
+numpy<2
+\end{lstlisting}
+\end{edgetrap}
+
+\begin{edgetrap}{Trap 2 --- NumPy 2.0 and the ABI break}
+NumPy 2.0 (released mid-2024) changed its C application binary interface. Extension modules compiled
+against NumPy 1.x --- which includes the MediaPipe 0.10.x wheels --- can fail at import time with
+messages about binary incompatibility, or worse, import and then crash.
+
+Pinning \code{numpy<2} resolves it to the 1.26.x line, which is also the last version supporting
+Python 3.9--3.12 across the board. If you see \code{pip} proposing to upgrade NumPy as a
+``helpful'' side effect of another install, decline.
+\end{edgetrap}
+
+\begin{edgetrap}{Trap 3 --- \code{mp.solutions} no longer exists (the load-bearing pin)}
+This is the one that matters most, because it is not a subtlety --- it is a hard removal.
+
+The legacy API used by this project, \code{mp.solutions.hands.Hands}, was deprecated and then
+\textbf{removed} in MediaPipe 0.10.30+. On a newer version the very first attribute access fails:
+
+\begin{lstlisting}
+>>> import mediapipe as mp
+>>> mp.solutions.hands
+AttributeError: module 'mediapipe' has no attribute 'solutions'
+\end{lstlisting}
+
+\textbf{Consequence:} \code{pip install -U mediapipe} bricks the application. The pin
+\code{mediapipe==0.10.14} is therefore not a preference --- it is a load-bearing structural element,
+in the same sense as a beam holding up a floor.
+
+\textbf{Defence.} Rather than let the user discover this through an opaque
+\code{AttributeError} three imports deep, the application checks at import time and fails loudly with
+an actionable message. Here is the real guard, from \code{hand\_tracker.py}:
+
+\begin{codecard}
+\begin{lstlisting}
+if not hasattr(mp, "solutions") or not hasattr(mp.solutions, "hands"):
+    raise RuntimeError(
+        "mediapipe>=0.10.30 removed mp.solutions, which this app is built on. "
+        "Install the pinned version instead: pip install -r requirements.txt "
+        "(do NOT `pip install -U mediapipe`)."
+    )
+\end{lstlisting}
+\end{codecard}
+
+\begin{itemize}
+  \item \code{hasattr(mp, "solutions")} probes the attribute \emph{without} raising --- the whole
+        point of \code{hasattr} is that it returns \code{False} instead of blowing up. This is
+        exactly the situation it was designed for.
+  \item The \code{or} short-circuits: if \code{solutions} is missing entirely, the second
+        \code{hasattr} is never evaluated, so the guard itself cannot crash.
+  \item \code{raise RuntimeError} rather than \code{sys.exit} keeps the failure inside Python's
+        normal error machinery, so a test harness or an editor sees a real traceback.
+  \item The message names \emph{the fix}, not just the problem. A good error message tells you what
+        to type next.
+\end{itemize}
+\end{edgetrap}
+
+\subsection{Suppressing the deprecation noise}
+
+Deprecated APIs like these emit warnings on import, which pollute a live console that is already
+printing FPS telemetry. The project silences them \emph{only around the import}, so genuine warnings
+elsewhere still surface:
+
+\begin{codecard}
+\begin{lstlisting}
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    import mediapipe as mp
+\end{lstlisting}
+\end{codecard}
+
+The \code{with} block restores the previous warning behaviour on exit. Warning filters are global
+state; changing them permanently to hide one import's noise would suppress diagnostics you may
+actually need later --- for instance a NumPy deprecation that only appears under load.
+
+\section{Confidence thresholds: what 0.7 and 0.6 actually control}
+
+The tracker constructs the model with four arguments. Two of them are thresholds, and they are the
+difference between a twitchy detector and a sluggish one.
+
+\begin{codecard}
+\begin{lstlisting}
+self.hands = mp_hands.Hands(
+    static_image_mode=mode,
+    max_num_hands=max_hands,
+    min_detection_confidence=det_conf,     # default 0.7
+    min_tracking_confidence=track_conf,    # default 0.6
+)
+\end{lstlisting}
+\end{codecard}
+
+\begin{mlconcept}{Two thresholds, two different questions}
+\begin{itemize}
+  \item \code{min\_detection\_confidence = 0.7} applies when the system is \emph{looking for a new
+        hand} --- stage 1, the palm detector running over the whole frame. A candidate box must score
+        at least 0.7 to be accepted.
+  \item \code{min\_tracking\_confidence = 0.6} applies when the system is \emph{following a hand it
+        already found}, using the landmarks predicted from the previous frame. The bar is lower
+        because tracking has more evidence: it knows where the hand just was.
+\end{itemize}
+
+Why the asymmetry? Detection is a \emph{false-positive} problem: if you accept weak candidates, a
+folded sleeve or a face can spawn a phantom hand. Tracking is a \emph{false-negative} problem: if you
+drop the hand for one frame, the on-screen count flickers and the debouncer restarts.
+
+So the design is deliberately conservative about discovering hands (0.7) and forgiving about keeping
+them (0.6). Lowering detection to ~0.5 is the usual first experiment for a dim room --- with the
+warning that phantom hands become likelier. Raising it toward 0.9 makes the tracker refuse to see
+your hand until it is well lit and centred.
+\end{mlconcept}
+
+\subsection{\code{static\_image\_mode} and \code{max\_num\_hands}}
+
+\begin{itemize}
+  \item \code{static\_image\_mode=True} disables temporal tracking. Every frame is treated as an
+        unrelated still, so the detector runs every time. It is slower and noisier on video, but it
+        is exactly right for \code{--image} mode, where there is only one frame and nothing to
+        track. The CLI exposes it as \code{--static} for live use; \code{run\_image()} always sets
+        it to \code{True}.
+  \item \code{max\_num\_hands=2} caps how many hands are searched for. It is a genuine performance
+        knob: the detector's cost grows with the number of candidate boxes it keeps. Two is the
+        right default for a two-handed demo; raise it only if you need more.
+\end{itemize}
+
+\section{Handedness, and why the label inverts}
+
+The model also emits a \textbf{handedness} classification --- ``Left'' or ``Right'' --- with a score.
+Beginners assume this is a property of the hand in the image. It is not: it is a prediction made
+under an assumption about how the image was captured.
+
+\begin{edgetrap}{The mirrored-feed trap: MediaPipe assumes a selfie}
+MediaPipe's documentation is explicit: handedness is predicted \emph{assuming the input image is
+mirrored}, as when a front-facing camera feed has already been flipped horizontally --- the normal
+convention for a selfie.
+
+This project flips the frame for exactly that reason --- a mirrored view is what makes a webcam feel
+like a mirror and makes ``move right'' move right on screen:
+
+\begin{lstlisting}
+frame = cv2.flip(frame, 1)
+\end{lstlisting}
+
+But that flip happens \textbf{before} MediaPipe ever sees the frame. The result: on many webcams and
+configurations the label comes back \emph{inverted} --- your physical right hand is reported as
+``Left''.
+
+\textbf{Why this is handled by design rather than patched.} The project never lets the label drive
+geometry. The finger logic uses handedness only in the explicitly opt-in \code{--thumb-mode x}; the
+default thumb rule is handedness-free by construction (Section~\ref{sec:thumb}). The label is
+treated as \emph{display telemetry}, and the escape hatch is a display-only fix:
+
+\begin{lstlisting}
+--swap-handedness     # swap the Left/Right labels in the HUD
+\end{lstlisting}
+
+Because the swap happens inside \code{parse\_hand\_data}, it also flows through to the per-hand
+smoothing and debouncing keys, so no state is orphaned by the change.
+\end{edgetrap}
+
+\begin{keyidea}
+\textbf{Chapter summary.} Detection is deliberately split in two: a cheap detector finds a palm box,
+and an expensive network regresses 21 named 3D landmarks inside that crop --- which is what makes
+real-time performance on a CPU achievable. The three pins each defend against a specific, real
+failure: two competing \code{cv2} packages, the NumPy 2 ABI break, and the removal of
+\code{mp.solutions}. The two confidence thresholds are tuned asymmetrically --- strict about
+discovering hands, forgiving about losing them --- and the handedness label is display-only, because
+on a mirrored feed it cannot be trusted.
+\end{keyidea}

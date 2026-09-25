@@ -1,0 +1,231 @@
+\appendix
+
+\chapter{Complete Source Listings}
+\label{app:source}
+
+The three files that make up the project, printed in full. These are the exact files from the
+repository --- included here with \code{\textbackslash lstinputlisting}, not retyped --- so the line
+numbers match those used throughout Chapter~\ref{ch:source}.
+
+\section{\code{hand\_logic.py}}
+
+The pure-logic module: no OpenCV, no MediaPipe, no camera. Everything in
+Chapter~\ref{ch:math} lives here.
+
+\lstinputlisting{../hand_logic.py}
+
+\clearpage
+\section{\code{hand\_tracker.py}}
+
+The application: the model, the capture loop, the HUD, the CLI, the camera fallback chain, and the
+headless \code{--image} mode.
+
+\lstinputlisting{../hand_tracker.py}
+
+\clearpage
+\section{\code{tests/test\_hand\_logic.py}}
+
+The offline suite. Synthetic coordinates only --- it runs in a bare Python interpreter with no
+camera and no third-party packages installed.
+
+\lstinputlisting{../tests/test_hand_logic.py}
+
+\chapter{Verification Checklist and Troubleshooting}
+\label{app:verify}
+
+\section{Setup and first run}
+
+\begin{center}
+\rowcolors{2}{slatebg}{white}
+\begin{tabularx}{\textwidth}{@{}r l X@{}}
+\toprule
+\rowcolor{white}
+\textbf{\#} & \textbf{Step} & \textbf{What success looks like} \\
+\midrule
+1 & \code{python -m venv .venv} & A \code{.venv} directory appears. \\
+2 & activate, then \code{pip install -r requirements.txt} & Three packages install:
+  \code{mediapipe 0.10.14}, \code{opencv-contrib-python 4.11.0.86}, \code{numpy 1.26.x}. \\
+3 & \code{pytest -q} & All tests pass. No camera is touched. \\
+4 & \code{python hand\_tracker.py --image tests/fixtures/hand.png} & Prints a hand count and writes
+  \code{tests/fixtures/hand\_out.png}; exit code 0. \\
+5 & \code{python hand\_tracker.py} & A window titled \emph{Hand Tracker} opens with the mirrored
+  feed. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Live-mode acceptance tests}
+
+\begin{center}
+\rowcolors{2}{slatebg}{white}
+\begin{tabularx}{\textwidth}{@{}l X l@{}}
+\toprule
+\rowcolor{white}
+\textbf{Test} & \textbf{Procedure} & \textbf{Expected} \\
+\midrule
+Single hand & Raise one hand, fingers up. & HUD shows one line; the count matches your fingers. \\
+Two hands & Raise both hands. & Two lines, and the total is the sum. \\
+\textbf{Wrist rotation} & Rotate your wrist and turn the back of your hand toward the camera.
+  & \textbf{The thumb count must not flip.} This is the fix the distance rule exists for. \\
+Marker stability & Hold still and watch the index-finger dot. & It sits steady; no visible
+  vibration. \\
+Gesture debounce & Make a Peace sign, then a Fist. & The label changes once, after a few frames ---
+  no flicker through intermediate states. \\
+Empty scene & Remove your hands; cover the lens. & Count goes to 0; FPS keeps updating; no crash. \\
+Screenshot & Press \code{s}. & A timestamped PNG appears in \code{captures/} with the HUD burned in. \\
+Clean exit & Press \code{q}. & Window closes, camera light goes off, prompt returns. \\
+Fallback & \code{python hand\_tracker.py --camera 5} & Logs a warning per failed index, then either
+  opens another camera or exits with a clear message. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Troubleshooting}
+
+\begin{center}
+\rowcolors{2}{slatebg}{white}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\rowcolor{white}
+\textbf{Symptom} & \textbf{Cause and fix} \\
+\midrule
+\code{Could not open a webcam} & Another application holds the device (video call, browser tab, or a
+  previous run that was killed). Close it and retry, or use \code{--camera 1}. \\
+\code{RuntimeError: mediapipe>=0.10.30 removed mp.solutions} & MediaPipe was upgraded. Reinstall with
+  \code{pip install -r requirements.txt}. \\
+\code{ImportError: libGL.so.1} (Linux) & Missing system libraries for the non-headless OpenCV wheel:
+  \code{sudo apt-get install -y libgl1 libglib2.0-0}. \\
+Handedness labels look inverted & Expected on a mirrored feed. Display-only: relaunch with
+  \code{--swap-handedness}. \\
+Thumb never detects with \code{--thumb-mode x} & That rule assumes an upright, palm-facing hand. Use
+  the default \code{distance} mode. \\
+The dot is drawn in the wrong place & The frame changed size between \code{find\_hands} and
+  \code{find\_positions}; the cache is valid for one frame size only
+  (Section~\ref{sec:cache}). \\
+Low FPS & Reduce \code{--width}/\code{--height}, or pass \code{--no-draw} to skip the mesh. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\chapter{Glossary and Quick Reference}
+\label{app:glossary}
+
+\section{Glossary}
+
+\begin{description}
+  \item[Alpha blending] Combining two images by a weighted average,
+        $(1-\alpha)I_1 + \alpha I_2$. Used for the translucent HUD card with $\alpha = 0.6$.
+  \item[Anchor] A predefined box in a single-shot detector. BlazePalm refines anchors into palm
+        boxes.
+  \item[BGR] The channel order OpenCV uses: blue, green, red. MediaPipe expects RGB, hence the one
+        explicit conversion per frame.
+  \item[BlazePalm] The stage-1 detector. Finds palm boxes, not fingers --- palms are rigid, so they
+        are easier to detect robustly.
+  \item[Cross product] A vector operation producing a vector perpendicular to two inputs. Its
+        $z$-component here gives the signed area of the palm triangle, whose sign reveals which side
+        of the hand faces the camera.
+  \item[Debouncing] Requiring several consecutive agreeing observations before accepting a state
+        change. Used on gestures: 4 of the last 5 frames.
+  \item[Duck typing] Accepting any object that has the attributes you use, regardless of its class.
+        This is what makes \code{parse\_hand\_data} testable with a fake result object.
+  \item[EMA] Exponential moving average: a weighted blend of the current measurement and the previous
+        smoothed value, with geometrically decaying memory. Used on the index fingertip with
+        $\alpha = 0.65$.
+  \item[Euclidean distance] Straight-line distance,
+        $d = \sqrt{\Delta x^2 + \Delta y^2}$. The basis of the thumb rule.
+  \item[Frame] One still image from a video stream.
+  \item[FPS] Frames per second --- the loop's throughput. Averaged over a 30-frame window.
+  \item[HUD] Head-up display: the text overlay showing FPS, finger count, gesture and orientation.
+  \item[Inference] Running a trained model on new input. Training is not part of this project.
+  \item[Landmark] One of the 21 named 3D points the model predicts per hand.
+  \item[MCP / PIP / DIP / TIP] Knuckle, first finger joint, second finger joint, fingertip.
+  \item[Normalized coordinates] Positions in $[0,1]$ relative to the image size, so the model is
+        resolution-independent.
+  \item[Palm normal] The vector perpendicular to the palm plane; its $z$-component's sign says
+        whether the palm or the back faces the camera.
+  \item[ROI] Region of interest --- the rectangular slice of an image being processed, here the HUD
+        card area.
+  \item[Single-pass caching] Computing derived telemetry once per frame and reusing it, rather than
+        recomputing per call.
+  \item[Static image mode] MediaPipe configuration that treats each frame as an unrelated still.
+        Required for \code{--image} mode.
+  \item[Tensor] A multi-dimensional array of numbers. A frame is a 3D tensor of shape
+        $(H, W, 3)$.
+\end{description}
+
+\section{Constants and defaults}
+
+\begin{center}
+\rowcolors{2}{slatebg}{white}
+\begin{tabularx}{\textwidth}{@{}l l l X@{}}
+\toprule
+\rowcolor{white}
+\textbf{Name} & \textbf{Value} & \textbf{Where} & \textbf{Meaning} \\
+\midrule
+\code{min\_detection\_confidence} & 0.7 & tracker & Confidence to accept a \emph{new} hand. \\
+\code{min\_tracking\_confidence} & 0.6 & tracker & Confidence to keep \emph{following} a hand. \\
+\code{max\_num\_hands} & 2 & tracker & Hands searched for simultaneously. \\
+\code{EXPECTED\_LANDMARKS} & 21 & logic & Validity gate for a landmark list. \\
+\code{FINGER\_PAIRS} & \code{(8,6),(12,10),(16,14),(20,18)} & logic & Tip and PIP per long finger. \\
+\code{THUMB\_TIP} / \code{THUMB\_IP} / \code{PINKY\_MCP} & 4 / 3 / 17 & logic & The thumb rule's three
+  points. \\
+\code{INDEX\_TIP} & 8 & logic & The landmark carrying the smoothed marker. \\
+\code{alpha} (EMA) & 0.65 & logic & Smoothing weight on the newest sample. \\
+\code{window} / \code{min\_agree} & 5 / 4 & logic & Debouncer window and required agreement. \\
+\code{HUD\_ALPHA} & 0.6 & tracker & Overlay weight in the HUD blend. \\
+\code{FPS\_WINDOW} & 30 & tracker & Frames averaged for the FPS readout. \\
+DEFAULT\_WIDTH / HEIGHT & 640 / 480 & tracker & Live capture size. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Dependency reference}
+
+\begin{center}
+\rowcolors{2}{slatebg}{white}
+\begin{tabularx}{\textwidth}{@{}l l X@{}}
+\toprule
+\rowcolor{white}
+\textbf{Package} & \textbf{Pin} & \textbf{Why this exact version} \\
+\midrule
+\code{mediapipe} & \code{0.10.14} & Last line with the legacy \code{mp.solutions.hands} API; removed
+  in 0.10.30+. Load-bearing --- do not upgrade. \\
+\code{opencv-contrib-python} & \code{4.11.0.86} & The superset build MediaPipe depends on; avoids two
+  competing \code{cv2} installs. \\
+\code{numpy} & \code{<2} & MediaPipe 0.10.x wheels are compiled against the NumPy 1.x ABI. \\
+Python & 3.9--3.12 & 3.13 has no wheel for MediaPipe 0.10.14. Tested on 3.12. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Files in the project}
+
+\begin{center}
+\rowcolors{2}{slatebg}{white}
+\begin{tabularx}{\textwidth}{@{}l X@{}}
+\toprule
+\rowcolor{white}
+\textbf{File} & \textbf{Purpose} \\
+\midrule
+\code{hand\_logic.py} & Pure logic: parsing, finger and thumb rules, palm normal, EMA, gestures,
+  debouncing. Standard library only. \\
+\code{hand\_tracker.py} & Application: \code{HandTracker}, capture loop, HUD, CLI, camera fallback,
+  \code{--image} mode. \\
+\code{tests/test\_hand\_logic.py} & Offline geometry and parse tests. No camera, no MediaPipe. \\
+\code{tests/test\_hand\_tracker.py} & Cache and HUD tests; skips itself when cv2/mediapipe are
+  absent. \\
+\code{conftest.py} & Puts the project root on \code{sys.path} so \code{pytest} works as a bare
+  console script. \\
+\code{requirements.txt} & The three pins. \\
+\code{run.bat} & Double-click launcher: uses the venv interpreter, passes arguments through. \\
+\code{doc/build.bat} & Rebuilds this handbook (two \code{pdflatex} passes). \\
+\code{.github/workflows/ci.yml} & Logic tests on 3.11/3.12, plus a full-dependency pipeline smoke
+  test. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\vfill
+\begin{center}
+{\sffamily\color{slatetext}\small End of handbook.}
+\end{center}

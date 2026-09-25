@@ -1,0 +1,397 @@
+% =====================================================================
+%  Real-Time Hand & Finger Tracker with MediaPipe and OpenCV
+%  A Complete Study Handbook
+%
+%  Build (from this directory):
+%      pdflatex Study-Handbook.tex
+%      pdflatex Study-Handbook.tex      <- twice, for the table of contents
+%
+%  The chapter bodies live in ch01..ch05 + appendix-source.tex.
+%  Chapter 5 and the appendices quote the real project source files with
+%  \lstinputlisting, so the code printed here cannot drift from the code
+%  that ships. Build from the doc/ directory.
+% =====================================================================
+
+\documentclass[11pt,a4paper,oneside]{report}
+
+% ---------- Encoding, fonts, typography ------------------------------
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[scaled=0.90]{helvet}
+\usepackage{inconsolata}
+\usepackage{textcomp}
+\usepackage{microtype}
+\usepackage[left=1in,right=1in,top=1.05in,bottom=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage[table]{xcolor}
+\usepackage{booktabs,array,tabularx,longtable}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{needspace}
+\usepackage{emptypage}
+
+% ---------- Palette --------------------------------------------------
+\definecolor{navy}{HTML}{1E293B}        % primary headers / titles
+\definecolor{navydark}{HTML}{0F172A}    % code panel background
+\definecolor{cyanx}{HTML}{0EA5E9}       % primary accent
+\definecolor{tealx}{HTML}{0D9488}       % secondary accent
+\definecolor{amberx}{HTML}{F59E0B}      % warnings
+\definecolor{redx}{HTML}{EF4444}        % traps / errors
+\definecolor{violetx}{HTML}{8B5CF6}     % ML cards
+\definecolor{slatebg}{HTML}{F8FAFC}     % box backgrounds
+\definecolor{slateline}{HTML}{E2E8F0}   % table striping / rules
+\definecolor{slatetext}{HTML}{475569}   % muted body text
+\definecolor{skysoft}{HTML}{EFF6FF}     % python card background
+\definecolor{violetsoft}{HTML}{F5F3FF}  % ml card background
+\definecolor{tealsoft}{HTML}{F0FDFA}    % math card background
+\definecolor{ambersoft}{HTML}{FFFBEB}   % trap card background
+\definecolor{codekey}{HTML}{7DD3FC}     % listings: keywords
+\definecolor{codestr}{HTML}{FCD34D}     % listings: strings
+\definecolor{codecmt}{HTML}{94A3B8}     % listings: comments
+\definecolor{codenum}{HTML}{FCA5A5}     % listings: numbers
+\definecolor{codetext}{HTML}{E2E8F0}    % listings: body text
+
+% ---------- Headers and footers --------------------------------------
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{slateline}\leaders\hrule height \headrulewidth\hfill}}
+\fancyhead[L]{\small\sffamily\color{slatetext}\nouppercase{\leftmark}}
+\fancyhead[R]{\small\sffamily\color{navy}\thepage}
+\fancypagestyle{plain}{%
+  \fancyhf{}%
+  \renewcommand{\headrulewidth}{0pt}%
+  \fancyhead[R]{\small\sffamily\color{navy}\thepage}%
+}
+
+% ---------- Chapter and section styling ------------------------------
+\usepackage{titlesec}
+\titleformat{\chapter}[display]
+  {\normalfont\sffamily\bfseries\color{navy}}
+  {\flushright\large\sffamily\color{cyanx}\MakeUppercase{\chaptertitlename}\ \thechapter}
+  {0.6em}
+  {\Huge\flushright}
+  [\vspace{0.4em}{\color{slateline}\titlerule[1.2pt]}]
+\titlespacing*{\chapter}{0pt}{-18pt}{22pt}
+
+\titleformat{\section}
+  {\normalfont\Large\sffamily\bfseries\color{navy}}{\color{tealx}\thesection}{0.6em}{}
+\titleformat{\subsection}
+  {\normalfont\large\sffamily\bfseries\color{navy}}{\color{cyanx}\thesubsection}{0.6em}{}
+\titleformat{\subsubsection}
+  {\normalfont\normalsize\sffamily\bfseries\color{slatetext}}{\thesubsubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.6em}{0.5em}
+\titlespacing*{\subsection}{0pt}{1.2em}{0.4em}
+
+% ---------- Table of contents ----------------------------------------
+\usepackage{tocloft}
+\renewcommand{\cfttoctitlefont}{\Huge\sffamily\bfseries\color{navy}}
+\renewcommand{\cftaftertoctitle}{\vspace{0.4em}{\color{slateline}\hrule height 1.2pt}\vspace{0.6em}}
+\renewcommand{\cftchapfont}{\sffamily\bfseries\color{navy}}
+\renewcommand{\cftchappagefont}{\sffamily\bfseries\color{cyanx}}
+\renewcommand{\cftsecfont}{\color{navy}}
+\renewcommand{\cftsecpagefont}{\color{tealx}}
+\renewcommand{\cftsubsecfont}{\small\color{slatetext}}
+\renewcommand{\cftsubsecpagefont}{\small\color{slatetext}}
+\renewcommand{\cftdotsep}{1.2}
+\setlength{\cftbeforechapskip}{0.7em}
+\setlength{\cftbeforesecskip}{0.25em}
+
+% ---------- Links -----------------------------------------------------
+\usepackage[colorlinks=true,linkcolor=cyanx,citecolor=tealx,urlcolor=cyanx,
+            pdftitle={Real-Time Hand and Finger Tracker: A Complete Study Handbook},
+            pdfauthor={Project Study Handbook}]{hyperref}
+
+% ---------- Diagrams and teaching boxes ------------------------------
+\usepackage[many,skins,breakable]{tcolorbox}
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,shapes.geometric,calc,fit,backgrounds,
+                decorations.pathreplacing,decorations.markings}
+
+% The 21 MediaPipe hand landmarks, laid out for drawing: a right hand,
+% presented palm-to-camera, fingers up, in TikZ coordinates (y grows upward).
+% Defined once here and reused by the title page and the Chapter 3 diagrams
+% so every hand drawing in this handbook has identical geometry.
+\newcommand{\handcoordinates}{%
+  \coordinate (L0)  at ( 0.00, 0.00);   % wrist
+  \coordinate (L1)  at ( 1.10,-0.35);   % thumb CMC
+  \coordinate (L2)  at ( 1.90, 0.15);   % thumb MCP
+  \coordinate (L3)  at ( 2.45, 0.85);   % thumb IP
+  \coordinate (L4)  at ( 2.75, 1.55);   % thumb tip
+  \coordinate (L5)  at ( 0.85, 1.15);   % index MCP
+  \coordinate (L6)  at ( 0.95, 2.10);   % index PIP
+  \coordinate (L7)  at ( 1.00, 2.60);   % index DIP
+  \coordinate (L8)  at ( 1.05, 3.05);   % index tip
+  \coordinate (L9)  at ( 0.15, 1.35);   % middle MCP
+  \coordinate (L10) at ( 0.15, 2.35);   % middle PIP
+  \coordinate (L11) at ( 0.15, 2.90);   % middle DIP
+  \coordinate (L12) at ( 0.15, 3.40);   % middle tip
+  \coordinate (L13) at (-0.55, 1.25);   % ring MCP
+  \coordinate (L14) at (-0.60, 2.20);   % ring PIP
+  \coordinate (L15) at (-0.62, 2.70);   % ring DIP
+  \coordinate (L16) at (-0.65, 3.15);   % ring tip
+  \coordinate (L17) at (-1.15, 1.00);   % pinky MCP
+  \coordinate (L18) at (-1.30, 1.75);   % pinky PIP
+  \coordinate (L19) at (-1.38, 2.15);   % pinky DIP
+  \coordinate (L20) at (-1.45, 2.50);   % pinky tip
+}
+% The 21 skeletal connections MediaPipe reports as HAND_CONNECTIONS.
+\newcommand{\handbones}{%
+  \foreach \a/\b in {0/1,1/2,2/3,3/4,0/5,5/6,6/7,7/8,5/9,9/10,10/11,11/12,
+                     9/13,13/14,14/15,15/16,13/17,17/18,18/19,19/20,0/17}{%
+    \draw[handbone] (L\a) -- (L\b);}%
+}
+\tikzset{
+  handbone/.style={draw=slateline, line width=1.1pt},
+  joint/.style={circle, fill=cyanx, inner sep=0pt, minimum size=4.4pt},
+  jointtip/.style={circle, fill=amberx, inner sep=0pt, minimum size=6pt},
+  jointindex/.style={circle, fill=redx, inner sep=0pt, minimum size=6.8pt},
+}
+
+% ---------- Code listings --------------------------------------------
+\usepackage{listings}
+\lstdefinestyle{py}{
+  language=Python,
+  basicstyle=\ttfamily\footnotesize\color{codetext},
+  keywordstyle=\color{codekey}\bfseries,
+  commentstyle=\color{codecmt}\itshape,
+  stringstyle=\color{codestr},
+  numberstyle=\ttfamily\tiny\color{codecmt},
+  numbers=left, numbersep=9pt,
+  backgroundcolor=\color{navydark},
+  showstringspaces=false,
+  breaklines=true, breakatwhitespace=false,
+  tabsize=4, upquote=true,
+  columns=fullflexible, keepspaces=true,
+  xleftmargin=1.4em, xrightmargin=0.4em, framexleftmargin=1.2em,
+  extendedchars=true,
+  literate={---}{{\textcolor{codecmt}{---}}}1
+           {--}{{\textcolor{codecmt}{--}}}1
+}
+\lstdefinestyle{codetextonly}{
+  language=,
+  basicstyle=\ttfamily\footnotesize\color{codetext},
+  backgroundcolor=\color{navydark},
+  numbers=none, showstringspaces=false, breaklines=true,
+  columns=fullflexible, keepspaces=true,
+  xleftmargin=0.8em, xrightmargin=0.4em,
+}
+\lstset{style=py}
+
+% Rounded dark card that wraps a listing. Breakable, because several quoted
+% blocks are longer than a page's remaining space, and an unbreakable box would
+% push them to the next page and leave a large gap behind.
+\newtcolorbox{codecard}[1][]{
+  enhanced, breakable=true,
+  colback=navydark, colframe=navydark,
+  boxrule=0pt, arc=1.5mm,
+  left=0.5mm, right=0.5mm, top=1mm, bottom=1mm,
+  #1
+}
+
+% Inline code: \code{a_b} prints a_b literally, no escaping needed.
+\newcommand{\code}[1]{\texttt{\small\detokenize{#1}}}
+
+% ---------- Teaching environments ------------------------------------
+\newtcolorbox[auto counter, number within=chapter]{pythonconcept}[2][]{%
+  enhanced, breakable,
+  colback=skysoft, colframe=cyanx, boxrule=0.8pt, arc=2mm,
+  left=3mm, right=3mm, top=2.5mm, bottom=2.5mm,
+  fonttitle=\sffamily\bfseries,
+  coltitle=white, colbacktitle=cyanx,
+  title={Python Concept \thetcbcounter\ \textbullet\ #2},
+  attach boxed title to top left={xshift=3mm, yshift=-2.5mm},
+  boxed title style={arc=1mm, boxrule=0pt},
+  #1}
+
+\newtcolorbox[auto counter, number within=chapter]{mlconcept}[2][]{%
+  enhanced, breakable,
+  colback=violetsoft, colframe=violetx, boxrule=0.8pt, arc=2mm,
+  left=3mm, right=3mm, top=2.5mm, bottom=2.5mm,
+  fonttitle=\sffamily\bfseries,
+  coltitle=white, colbacktitle=violetx,
+  title={ML Concept \thetcbcounter\ \textbullet\ #2},
+  attach boxed title to top left={xshift=3mm, yshift=-2.5mm},
+  boxed title style={arc=1mm, boxrule=0pt},
+  #1}
+
+\newtcolorbox[auto counter, number within=chapter]{mathdeepdive}[2][]{%
+  enhanced, breakable,
+  colback=tealsoft, colframe=tealx, boxrule=1pt, arc=1mm,
+  left=3mm, right=3mm, top=2.5mm, bottom=2.5mm,
+  fonttitle=\sffamily\bfseries,
+  coltitle=white, colbacktitle=tealx,
+  title={Math Deep Dive \thetcbcounter\ \textbullet\ #2},
+  attach boxed title to top left={xshift=3mm, yshift=-2.5mm},
+  boxed title style={arc=1mm, boxrule=0pt},
+  #1}
+
+\newtcolorbox[auto counter, number within=chapter]{edgetrap}[2][]{%
+  enhanced, breakable,
+  colback=ambersoft, colframe=amberx, boxrule=1pt, arc=2mm,
+  left=3mm, right=3mm, top=2.5mm, bottom=2.5mm,
+  fonttitle=\sffamily\bfseries,
+  coltitle=white, colbacktitle=amberx,
+  title={Edge-Case Trap \thetcbcounter\ \textbullet\ #2},
+  attach boxed title to top left={xshift=3mm, yshift=-2.5mm},
+  boxed title style={arc=1mm, boxrule=0pt},
+  borderline west={2.5pt}{0pt}{redx},
+  #1}
+
+% Small inline "key idea" strip.
+\newtcolorbox{keyidea}[1][]{%
+  enhanced, breakable,
+  colback=slatebg, colframe=slateline, boxrule=0.6pt, arc=1mm,
+  left=3mm, right=3mm, top=2mm, bottom=2mm, #1}
+
+\newcommand{\term}[1]{\textbf{\color{navy}#1}}
+
+% ---------- Lists -----------------------------------------------------
+\setlist[itemize]{leftmargin=1.4em, itemsep=0.25em, topsep=0.4em}
+\setlist[enumerate]{leftmargin=1.6em, itemsep=0.3em, topsep=0.4em}
+\setlist[description]{leftmargin=1.4em, itemsep=0.25em}
+
+% ---------- Captions --------------------------------------------------
+\captionsetup{font={small,sf},labelfont={bf,color=navy},labelsep=period}
+
+% Longer identifiers (\code{...}, file paths) cannot hyphenate, so give TeX
+% extra room to stretch spaces rather than run into the margin.
+\emergencystretch=2.5em
+\setlength{\parskip}{0pt}
+
+% =====================================================================
+\begin{document}
+
+% ---------- Title page -----------------------------------------------
+\thispagestyle{empty}
+\begin{tikzpicture}[remember picture, overlay]
+  \fill[navy] (current page.north west) rectangle ([yshift=-9.9cm]current page.north east);
+  \fill[cyanx] ([yshift=-9.9cm]current page.north west) rectangle ([yshift=-10.15cm]current page.north east);
+  \fill[tealx] ([yshift=-10.15cm]current page.north west) rectangle ([yshift=-10.25cm]current page.north east);
+\end{tikzpicture}
+
+\vspace*{1.1cm}
+\begin{flushleft}
+  {\sffamily\bfseries\color{white}\fontsize{30}{34}\selectfont Real-Time Hand \&\\[2pt]
+   Finger Tracker\par}
+  \vspace{0.7cm}
+  {\sffamily\color{cyanx}\Large with MediaPipe and OpenCV\par}
+  \vspace{0.35cm}
+  {\sffamily\color{slateline}\large A Complete Study Handbook\par}
+\end{flushleft}
+
+\vspace{4.6cm}
+
+\begin{center}
+\begin{tikzpicture}[scale=0.72, every node/.style={font=\scriptsize\sffamily}]
+  \handcoordinates
+  \handbones
+  \foreach \i in {0,...,20} {\node[joint] at (L\i) {};}
+  \foreach \i in {4,12,16,20} {\node[jointtip] at (L\i) {};}
+  \node[jointindex] at (L8) {};
+  \node[below, color=slatetext] at (L0) {0 wrist};
+  \node[right, color=slatetext] at (L4) {4 thumb tip};
+  \node[above right, color=slatetext] at (L8) {8 index tip};
+  \node[left, color=slatetext] at (L17) {17 pinky MCP};
+\end{tikzpicture}
+\end{center}
+
+\vfill
+\begin{flushleft}
+  {\sffamily\color{slatetext}\small
+  Python 3.9--3.12 \textbullet\ MediaPipe 0.10.14 \textbullet\ OpenCV 4.11.0.86 \textbullet\ NumPy $<2$\\[4pt]
+  Everything in this handbook is traced to real, runnable code:\\
+  \code{hand_logic.py}, \code{hand_tracker.py}, \code{tests/test_hand_logic.py}\par}
+\end{flushleft}
+\vspace{0.6cm}
+
+\clearpage
+
+% ---------- How to use / legend --------------------------------------
+\chapter*{How to Use This Handbook}
+\addcontentsline{toc}{chapter}{How to Use This Handbook}
+\markboth{How to Use This Handbook}{}
+
+This handbook assumes \textbf{almost no Python} and \textbf{no machine learning at all}. Every idea
+is introduced with a physical analogy first, then made exact with mathematics, then connected to the
+actual line of code that implements it. Nothing is hand-waved and nothing is left as an exercise.
+
+\section*{Reading order}
+
+\begin{enumerate}
+  \item \textbf{Chapters 1--2} build the two backgrounds you are missing: the Python language, how
+        images are stored in memory, what a neural network is, and how MediaPipe actually finds a
+        hand. No geometry yet.
+  \item \textbf{Chapter 3} is the mathematical heart: the inverted $y$-axis, the thumb rules, the
+        palm normal, and the two signal-processing filters.
+  \item \textbf{Chapter 4} is system design: why the project is split in two modules, how the
+        per-frame cache works, and how the app survives a missing camera.
+  \item \textbf{Chapter 5} walks the source code block by block, quoting the real files.
+  \item \textbf{Appendices} hold the complete verbatim source, the verification checklist, and a
+        glossary.
+\end{enumerate}
+
+You do \emph{not} need a webcam to read any of this, and you do not need a webcam to run most of the
+code: the project ships a headless \code{--image} mode that runs the entire pipeline on a still
+picture.
+
+\section*{The four teaching cards}
+
+Throughout the handbook you will meet four coloured boxes. They always mean the same thing:
+
+\begin{pythonconcept}{Python language, from zero}
+  Soft blue cards teach the Python language itself: what a variable is, what \code{self} means, why
+  a \code{deque} is not a list. If you already know Python, you can skim these --- but they also
+  explain the \emph{idiom}, not just the syntax.
+\end{pythonconcept}
+
+\begin{mlconcept}{Computer vision and machine learning}
+  Soft purple cards demystify the ML half: what a tensor is, what a convolutional layer does, what
+  ``inference'' means. No mathematics of training is assumed or required.
+\end{mlconcept}
+
+\begin{mathdeepdive}{Derivations step by step}
+  Teal framed cards derive the geometry and signal processing used by the app, with every algebraic
+  step shown and a worked numeric example. Nothing is asserted without proof.
+\end{mathdeepdive}
+
+\begin{edgetrap}{Physical failure modes}
+  Amber cards with a red spine flag the ways a hand tracker breaks in the real world: palm
+  inversion, the adducted ``knife hand'', camera-package conflicts. These are the difference
+  between a demo and a tool.
+\end{edgetrap}
+
+\section*{How code is presented}
+
+Code in this handbook is \textbf{quoted directly from the project files}, not retyped. That means
+the line numbers printed in the margin are the real line numbers of the real file, so you can open
+\code{hand_logic.py}, jump to line 127, and be looking at exactly what is printed here. Chapter 5
+quotes ranges; the appendices print each file whole.
+
+\begin{keyidea}
+\textbf{A note on the printed colours.} The listing panels use the project's own palette --- midnight
+navy background, cyan keywords, amber strings. If you are reading a greyscale printout, keywords
+appear bold, strings appear in a lighter grey, and comments are italic.
+\end{keyidea}
+
+\clearpage
+
+% ---------- Table of contents ----------------------------------------
+\renewcommand{\contentsname}{Contents}
+\tableofcontents
+
+\clearpage
+
+% ---------- Chapters --------------------------------------------------
+\input{ch01-foundations}
+\input{ch02-engine}
+\input{ch03-mathematics}
+\input{ch04-architecture}
+\input{ch05-source}
+\input{appendix-source}
+
+\end{document}

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  logic-tests:
+    name: Logic tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pytest
+        run: pip install pytest
+      # hand_logic.py imports nothing but the standard library, so this needs no
+      # camera, no OpenCV and no MediaPipe. test_hand_tracker.py skips itself here.
+      - name: Run tests
+        run: pytest -q
+
+  pipeline-smoke:
+    name: Pipeline smoke test (--image)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Non-headless OpenCV wheels need these on a minimal runner, otherwise
+      # `import cv2` dies with "libGL.so.1: cannot open shared object file".
+      - name: Install OpenCV system libraries
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+      - name: Run the full test suite with real dependencies
+        run: pytest -q
+      - name: Run the pipeline on a still image
+        run: python hand_tracker.py --image tests/fixtures/hand.png
+      - name: Assert the annotated frame was written
+        run: test -f tests/fixtures/hand_out.png
